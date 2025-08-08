@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Weekly To-Do Calendar</title>
+
+    <!-- Bootstrap 3 -->
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css"
+    />
+    <!-- FullCalendar -->
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/3.10.2/fullcalendar.min.css"
+      rel="stylesheet"
+    />
+    <!-- jQuery UI -->
+    <link
+      rel="stylesheet"
+      href="https://code.jquery.com/ui/1.12.1/themes/smoothness/jquery-ui.css"
+    />
+
+    <style>
+      body {
+        padding: 20px;
+      }
+      #external-events {
+        width: 200px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        background: #f9f9f9;
+        float: left;
+        margin-right: 20px;
+      }
+      #external-events h4 {
+        margin-top: 0;
+      }
+      .fc-event {
+        margin: 5px 0;
+        padding: 4px;
+        background-color: #3174ad;
+        color: white;
+        cursor: move;
+      }
+      #calendar {
+        max-width: 900px;
+        float: left;
+      }
+      .fc-agenda .fc-now-indicator {
+        border-color: red;
+        border-width: 3px;
+        z-index: 9999;
+      }
+
+      .fc-now-indicator-arrow {
+        border-top-color: red !important;
+        border-width: 8px !important;
+      }
+
+      .fc-time-grid .fc-now-indicator-line {
+        border-top: 3px solid red;
+        z-index: 9999;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid">
+      <div id="external-events">
+        <h4>To-Do List</h4>
+        <!-- We'll dynamically populate these -->
+      </div>
+
+      <div id="calendar"></div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <script src="https://momentjs.com/downloads/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fullcalendar/3.10.2/fullcalendar.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+
+    <script>
+      const todoList = [
+        {
+          title: "FreshenUp",
+          description: "",
+          duration: 30,
+          startTime: "07:00",
+        },
+        {
+          title: "Preparation",
+          description: "prepare meals",
+          duration: 30,
+          startTime: "09:00",
+        },
+        { title: "Breakfast", duration: 30, startTime: "09:30" },
+        { title: "Walk", duration: 15 },
+        { title: "Travel or Exercise", duration: 45 },
+        {
+          title: "Scrum",
+          description: "Work Day Start",
+          duration: 30,
+          startTime: "13:30",
+        },
+        { title: "Lunch", duration: 30, startTime: "14:00" },
+        { title: "Walk Or Play Table Tennis", duration: 15 },
+        { title: "Continue TT or Relax or Nap", duration: 15 },
+        { title: "Travel or Exercise", duration: 60, startTime: "19:00" },
+        { title: "Dinner", duration: 30, startTime: "20:00" },
+        { title: "Walk", duration: 15 },
+        { title: "Friends", duration: 30 },
+        { title: "Family", duration: 45 },
+        { title: "Set Bed", duration: 10, startTime: "22:00" },
+        { title: "Facial Care", duration: 5 },
+        { title: "Skin Care", duration: 5 },
+        { title: "Hair Care", duration: 5 },
+        { title: "Night Drink && Next Day ToDo List", duration: 10 },
+        { title: "Night Meditation", duration: 10 },
+        { title: "Sleep", duration: 60, startTime: "23:00" },
+      ];
+
+      const today = moment().format("YYYY-MM-DD");
+      let currentTime = moment(`${today}T00:00`);
+      const calendarEvents = [];
+
+      // 1. Prepopulate the calendar events
+      todoList.forEach((task) => {
+        let start;
+        if (task.startTime) {
+          start = moment(`${today}T${task.startTime}`);
+          currentTime = moment(start);
+        } else {
+          start = moment(currentTime);
+        }
+
+        const end = moment(start).add(task.duration, "minutes");
+
+        calendarEvents.push({
+          title: task.title,
+          start: start.format(),
+          end: end.format(),
+          description: task.description || "",
+        });
+
+        currentTime = moment(end);
+      });
+
+      // 2. Populate draggable to-do list
+      todoList.forEach((task) => {
+        const $div = $('<div class="fc-event"></div>')
+          .text(task.title)
+          .attr("data-duration", task.duration)
+          .data("event", {
+            title: task.title,
+            duration: task.duration,
+            stick: true,
+          });
+
+        $("#external-events").append($div);
+
+        $div.draggable({
+          zIndex: 999,
+          revert: true,
+          revertDuration: 0,
+        });
+      });
+
+      // 3. Initialize the calendar
+      $(function () {
+        $("#calendar").fullCalendar({
+          header: {
+            left: "prev,next today",
+            center: "title",
+            right: "agendaWeek,agendaDay,month",
+          },
+          defaultView: "agendaWeek",
+          editable: true,
+          droppable: true,
+          allDaySlot: false,
+          nowIndicator: true, // highlight current time
+          slotDuration: "00:05:00",
+          events: calendarEvents,
+          drop: function (date) {
+            // Nothing extra needed; handled by draggable .data()
+          },
+          eventReceive: function (event) {
+            console.log("Event dropped:", event.title);
+          },
+          eventRender: function (event, element) {
+            const start = moment(event.start).format("HH:mm");
+            const end = moment(event.end).format("HH:mm");
+
+            let tooltipContent = `<strong>${event.title}</strong><br>`;
+            tooltipContent += `<em>${start} – ${end}</em>`;
+            if (event.description) {
+              tooltipContent += `<br><small>${event.description}</small>`;
+            }
+
+            // Use `data-original-title` for Bootstrap tooltip with HTML
+            element.attr("data-original-title", tooltipContent);
+            element.tooltip({
+              container: "body",
+              html: true,
+              trigger: "hover",
+            });
+          },
+        });
+      });
+    </script>
+  </body>
+</html>

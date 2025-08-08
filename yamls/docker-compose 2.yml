@@ -1,0 +1,257 @@
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: ./containers/nginx/Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=api.local.uat   # change this for different domains
+    volumes:
+      - ./containers/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./tmp/certbot/www:/var/www/certbot
+      - ./tmp/certbot/conf:/etc/letsencrypt
+      - ./tmp/certs:/etc/ssl/certs    # persist generated certs
+    depends_on:
+      - mongo
+      - kafka
+      - redis
+      - emulator
+      - grafana
+      - prometheus
+    networks:
+      - backend
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./tmp/certbot/www:/var/www/certbot
+      - ./tmp/certbot/conf:/etc/letsencrypt
+    command: certonly --webroot --webroot-path=/var/www/certbot --email your-email@example.com --agree-tos --no-eff-email -d verity.local.uat -d emulator.local.uat
+    networks:
+      - backend
+
+  node:
+    build:
+      context: .
+      dockerfile: ./containers/node/Dockerfile
+    working_dir: /home/node/app
+    env_file:
+      - ./containers/node/.env
+    volumes:
+      - ./volumes/api.web:/home/node/app
+      - ./volumes:/home/node
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "5001:5001"
+    command: sh -c "npm install && npm start"
+    depends_on:
+      - mongo
+      - kafka
+      - redis
+      - emulator
+      - loki
+    networks:
+      - backend
+
+  mongo:
+    image: mongo:7
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    volumes:
+      - ./tmp/mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - backend
+
+  mongo-express:
+    image: mongo-express
+    container_name: mongo-express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: example
+      ME_CONFIG_MONGODB_SERVER: mongo
+    depends_on:
+      - mongo
+    networks:
+      - backend
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./tmp/redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    restart: always
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: "local:redis:6379"
+    depends_on:
+      - redis
+    networks:
+      - backend
+
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - backend
+
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    depends_on:
+      - zookeeper
+    networks:
+      - backend
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8083:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+    depends_on:
+      - kafka
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./containers/grafana/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - node
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    restart: always
+    ports:
+      - "3101:3000"
+    volumes:
+      - ./tmp/grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - backend
+
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./containers/grafana/loki:/etc/loki
+      - ./tmp/loki_data/index:/loki/index
+      - ./tmp/loki_data/index_cache:/loki/index_cache
+      - ./tmp/loki_data/chunks:/loki/chunks
+      - ./tmp/loki_data/wal:/wal
+      - ./tmp/loki_data/compactor:/loki/compactor
+      - ./tmp/loki_data:/loki
+    networks:
+      - backend
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log
+      - ./containers/grafana/promtail-config.yaml:/etc/promtail/promtail.yaml
+    command: -config.file=/etc/promtail/promtail.yaml
+    depends_on:
+      - loki
+    networks:
+      - backend
+
+  emulator:
+    build:
+      context: .
+      dockerfile: ./containers/firebase/Dockerfile
+    container_name: emulator
+    working_dir: /app
+    volumes:
+      - ./containers/firebase:/app
+      - ./firebase_data:/data
+    ports:
+      - "4000:4000"
+      - "8080:8080"
+      - "9099:9099"
+      - "9199:9199"
+      - "8085:8085"
+    environment:
+      - CODESPACES=true
+      - FIREBASE_PROJECT_ID=ww-coach-staging
+      - FIREBASE_TOKEN=4/0Ab_5qlnkHLGMmS7b1kkjz3WcWJShRr5KFPQUuYXPNF7a245ZD8PphKE5VDhco4IOQmurbA
+      - FIRESTORE_EMULATOR_HOST=0.0.0.0:8080
+      - FIREBASE_AUTH_EMULATOR_HOST=0.0.0.0:9099
+      - FIREBASE_STORAGE_EMULATOR_HOST=0.0.0.0:9199
+      - PUBSUB_EMULATOR_HOST=0.0.0.0:8085
+    networks:
+      - backend
+
+volumes:
+  firebase_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./tmp/firebase_data
+
+networks:
+  backend:
